@@ -1,9 +1,11 @@
 -- ============================================================================
---  Cokeboys NoKey Hardened Loader v2.2 (2026-09-30)
+--  Cokeboys NoKey ULTIMATE Loader v3.0 (2026-09-30)
 --  4-URL (GitHub raw + jsdelivr CDN + GitHub mirror + githack)
---  + cache-buster
---  + ตรวจเวอร์ชัน + ตรวจ integrity หลายชั้น (size + markers)
+--  + cache-buster + VERSION-GATED download (ปฏิเสธไฟล์เวอร์ชันเก่าจาก CDN เสมอ
+--    ถ้า URL ไหนให้ไฟล์เก่า = ข้ามไป URL ถัดไปทันที ไม่มีการรันไฟล์เก่าอีกแล้ว)
+--  + ตรวจ integrity หลายชั้น (size + markers + version literal)
 --  + retry พร้อม backoff/jitter + ลองหลาย HTTP API
+--  + ตรวจสอบหลังรัน (verify layer ของ v3.0 ทำงานจริง)
 --  + แจ้ง error ภาษาไทยชัดเจน
 --
 --  ตัวเลือกเสริม (แก้ก่อนรันได้):
@@ -18,7 +20,7 @@ local CONFIG = {
                 "https://github.com/auto578wqd/loader/raw/main/cokeboys-bloxfruits-NOKKEY.lua",
                 "https://raw.githack.com/auto578wqd/loader/main/cokeboys-bloxfruits-NOKKEY.lua",
         },
-        EXPECT_VERSION = '__nkver="v2.2"',  -- literal จริงในไฟล์ (banner ใช้ string concat)
+        EXPECT_VERSION = '__nkver="v3.0"',  -- literal จริงในไฟล์ (banner ใช้ string concat)
         MARKERS  = { "setmetatable", "COKEBOYS-OFFLINE-KEY", "__nkver=" },
         MIN_SIZE = 100000,                  -- ไฟล์จริง ~2.3MB (กันได้ไฟล์ html/error page)
         RETRIES  = 3,
@@ -39,7 +41,7 @@ if type(LCFG.urls) == "table" then
 end
 
 local function vlog(...)
-        if VERBOSE then print("[NoKey Loader v2.2]", ...); end
+        if VERBOSE then print("[NoKey Loader v3.0]", ...); end
 end
 
 local function notify(title, text, dur)
@@ -83,28 +85,43 @@ local function fetch(url)
         return nil, "no working http api in this executor"
 end
 
-print(("[NoKey Loader v2.2] เริ่มดาวน์โหลด... (%d URL, retry %d ครั้ง/URL)"):format(#CONFIG.URLS, CONFIG.RETRIES))
+-- ตรวจไฟล์ว่าเป็น v3.0 จริง: size + markers + version literal (ทั้งหมดต้องผ่าน)
+local function verify(src)
+        if type(src) ~= "string" or #src < CONFIG.MIN_SIZE then
+                return false, "size ต่ำกว่า " .. tostring(CONFIG.MIN_SIZE) .. " bytes"
+        end
+        for _, mk in ipairs(CONFIG.MARKERS) do
+                if not src:find(mk, 1, true) then
+                        return false, "marker หาย: " .. mk
+                end
+        end
+        if not src:find(CONFIG.EXPECT_VERSION, 1, true) then
+                return false, "ไม่ใช่ไฟล์ v3.0 (เป็นไฟล์เก่าหรือแคช CDN เก่า)"
+        end
+        return true, "ok"
+end
 
--- 1) ดาวน์โหลด: ไล่ทุก URL ตามลำดับ + retry พร้อม backoff/jitter
+print(("[NoKey Loader v3.0] เริ่มดาวน์โหลด... (%d URL, retry %d ครั้ง/URL, version-gated)"):format(#CONFIG.URLS, CONFIG.RETRIES))
+notify("NoKey Loader v3.0", "กำลังโหลดสคริปต์ (v3.0)...", 4)
+
+-- 1) ดาวน์โหลด + VERSION GATE: ไฟล์เก่า = ถือว่าล้มเหลวทันที ไป URL ถัดไป
 local src, usedURL, usedAPI = nil, nil, nil
 for _, url in ipairs(CONFIG.URLS) do
         for attempt = 1, CONFIG.RETRIES do
                 local bust = url .. "?nk=" .. tostring(os.time()) .. tostring(math.random(1000, 9999))
                 local t0 = os.clock()
                 local res, api = fetch(bust)
-                if type(res) == "string" and #res >= CONFIG.MIN_SIZE then
-                        local pass = true
-                        for _, mk in ipairs(CONFIG.MARKERS) do
-                                if not res:find(mk, 1, true) then pass = false break end
-                        end
-                        if pass then
+                if type(res) == "string" and #res > 0 then
+                        local ok, why = verify(res)
+                        if ok then
                                 src, usedURL, usedAPI = res, url, api
                                 print(("[NoKey Loader] ดาวน์โหลดสำเร็จ: %s | ครั้งที่ %d | %d bytes (~%.1f KB) | %.0f ms | %s ผ่าน %s")
                                         :format(urlKind(url), attempt, #res, #res / 1024, (os.clock() - t0) * 1000, url, api))
                                 break
+                        else
+                                warn(("[NoKey Loader] [%s] ครั้งที่ %d/%d: ได้ไฟล์แต่ไม่ผ่านเงื่อนไข (%d bytes) - %s")
+                                        :format(urlKind(url), attempt, CONFIG.RETRIES, #res, why))
                         end
-                        warn(("[NoKey Loader] [%s] ครั้งที่ %d/%d: ได้ไฟล์แต่ integrity ไม่ผ่าน (%d bytes) - %s")
-                                :format(urlKind(url), attempt, CONFIG.RETRIES, #res, url))
                 else
                         warn(("[NoKey Loader] [%s] ครั้งที่ %d/%d ล้มเหลว: %s")
                                 :format(urlKind(url), attempt, CONFIG.RETRIES, tostring(api)))
@@ -118,23 +135,16 @@ for _, url in ipairs(CONFIG.URLS) do
 end
 
 if not src then
-        local msg = "ดาวน์โหลดไม่สำเร็จจากทุกช่องทาง (raw / jsdelivr / github mirror / githack)\n"
-                .. "ตรวจว่า: 1) repo auto578wqd/loader เป็น Public 2) ไฟล์ cokeboys-bloxfruits-NOKKEY.lua อยู่ branch main 3) เน็ตปกติ (ทดสอบเปิด URL ในเบราว์เซอร์ได้ ไม่ต้องใช้ VPN)"
+        local msg = "ดาวน์โหลด v3.0 ไม่สำเร็จจากทุกช่องทาง (raw / jsdelivr / github mirror / githack)\n"
+                .. "ตรวจว่า: 1) repo auto578wqd/loader เป็น Public และอัปโหลดไฟล์ v3.0 แล้ว\n"
+                .. "2) เคลียร์แคช CDN ที่ https://www.jsdelivr.com/tools/purge (ถ้าเพิ่งอัปโหลด)\n"
+                .. "3) เน็ตปกติ (เปิด URL ในเบราว์เซอร์ได้ ไม่ต้องใช้ VPN)"
         warn("[NoKey Loader] " .. msg)
-        notify("NoKey Loader", "โหลดไม่สำเร็จทุกช่องทาง - ดู console (F9)", 8)
+        notify("NoKey Loader", "โหลดไม่สำเร็จ - ดู console (F9)", 8)
         return
 end
 
--- 2) ตรวจเวอร์ชัน (literal จริงในไฟล์ - ไม่ใช่ข้อความที่ประกอบตอน runtime)
-if src:find(CONFIG.EXPECT_VERSION, 1, true) then
-        print("[NoKey Loader] เวอร์ชันถูกต้อง: v2.2 (ดึงผ่าน " .. tostring(usedAPI) .. ")")
-else
-        warn("[NoKey Loader] !! ไฟล์ที่ได้ไม่ใช่ v2.2 (อาจเป็นไฟล์เก่า หรือแคช CDN เก่า) !!")
-        warn("[NoKey Loader] แก้ไข: 1) อัปโหลดไฟล์ v2.2 ทับใน GitHub (branch main) 2) เคลียร์แคช jsdelivr ที่ https://www.jsdelivr.com/tools/purge")
-        notify("NoKey Loader", "ได้ไฟล์เก่า - อัป v2.2 ทับ + เคลียร์แคช CDN", 10)
-end
-
--- 3) compile พร้อมรายงาน error ที่อ่านได้
+-- 2) compile พร้อมรายงาน error ที่อ่านได้
 local fn, compileErr = loadstring(src)
 if not fn then
         warn("[NoKey Loader] โค้ดเสียหาย ไม่สามารถ compile ได้: " .. tostring(compileErr))
@@ -142,11 +152,26 @@ if not fn then
         return
 end
 
--- 4) รันพร้อมจับ error ให้สั้นและชัด
+-- 3) รันพร้อมจับ error ให้สั้นและชัด
 local okRun, runErr = pcall(fn)
 if not okRun then
         warn("[NoKey Loader] Runtime error: " .. tostring(runErr))
         notify("NoKey Loader", "สคริปต์ error - ดู console (F9)", 10)
-else
-        print("[NoKey Loader] โหลดเสร็จสมบูรณ์ (v2.2 ผ่าน " .. urlKind(usedURL) .. ")")
+        return
 end
+print("[NoKey Loader] โหลดเสร็จสมบูรณ์ (v3.0 ผ่าน " .. urlKind(usedURL) .. ")")
+
+-- 4) POST-RUN VERIFY: ยืนยันว่า layer v3.0 ทำงานจริง (ตั้ง flag ใน getgenv)
+task.delay(2, function()
+        local okL, layer = pcall(function()
+                return (type(getgenv) == "function" and getgenv() or _G).CB_NoKey
+        end)
+        if okL and type(layer) == "table" and layer.version == "v3.0" then
+                print(("[NoKey Loader] ยืนยันแล้ว: layer v3.0 active (ready=%s guard=%s)")
+                        :format(tostring(layer.ready), tostring(layer.capabilities and layer.capabilities.hook)))
+                notify("NoKey Loader v3.0", "โหลดสำเร็จ - การ์ด + HUD ของ v3.0 ทำงานแล้ว", 6)
+        else
+                warn("[NoKey Loader] !! layer v3.0 ไม่ตอบสนอง (อาจโหลดผิดเวอร์ชัน) - กด F9 ดู console !!")
+                notify("NoKey Loader", "โหลดแล้วแต่ยืนยัน v3.0 ไม่ได้ - ดู F9", 8)
+        end
+end)
