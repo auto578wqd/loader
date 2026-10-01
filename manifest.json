@@ -1,0 +1,13 @@
+{
+  "product": "the-voider",
+  "version": "0.7.0",
+  "releaseId": "r2026-10-01-16",
+  "files": {
+    "the-voider.lua": {
+      "sha256": "b9d91ae217035fb1f87845058319187675d437906e17c0b9ba16c4d6ca27ad69",
+      "size": 321704
+    }
+  },
+  "minLoaderVersion": "0.3.0",
+  "channel": "stable"
+}
