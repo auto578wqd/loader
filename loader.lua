@@ -1,7 +1,7 @@
 -- THE VOIDER loader.lua — GENERATED FILE ห้ามแก้มือ (§3.10 กติกาเดียวกับ graph.lua)
 -- แหล่งต้นฉบับ: core/runtime/{preflight,version,sha256,manifest(?),update,loader_main} + core/foundation/json.lua
 -- ประกอบโดย build/tools/build_dist.py | loader version 0.3.0
--- เวอร์ชันล่าสุดของไฟล์นี้: ดูที่ repo thevoider (SSOT = ไฟล์ต้นฉบับใน core/)
+-- เวอร์ชันล่าสุดของไฟล์นี้: ดูที่ repo loader (SSOT = ไฟล์ต้นฉบับใน core/)
 
 __TV_EMBED = {}
 -- ==== embedded: preflight (core/runtime/preflight.lua) ====
@@ -342,7 +342,7 @@ local bor, band, bxor, bnot, rshift
 local opsReady = false
 
 local function initBit32()
-  local b = rawget(_G, "bit32")
+  local b = (type(bit32) == "table" and bit32) or rawget(_G, "bit32") -- VoltCompat
   if type(b) == "table" and type(b.bor) == "function"
     and type(b.band) == "function" and type(b.bxor) == "function" then
     bor, band, bxor = b.bor, b.band, b.bxor
@@ -354,7 +354,7 @@ local function initBit32()
 end
 
 local function initBitLib()
-  local b = rawget(_G, "bit")
+  local b = (type(bit) == "table" and bit) or rawget(_G, "bit") -- VoltCompat
   if type(b) == "table" and type(b.bor) == "function"
     and type(b.band) == "function" and type(b.bxor) == "function" then
     bor, band, bxor = b.bor, b.band, b.bxor
@@ -1037,6 +1037,13 @@ do
 
 -- หา dependency จาก 3 แหล่ง (test packages → embedded loader → ไม่มี = error)
 local function _pkg(name)
+  -- NoKey-VoltCompat v1: executor sandboxes (Volt) hide chunk-written
+  -- globals from rawget(_G) — plain reads go through the chunk env, so
+  -- try them first and keep the original _G lookups as fallbacks.
+  local pg = __TV_PACKAGES
+  if type(pg) == "table" and pg[name] then return pg[name] end
+  local pe = __TV_EMBED
+  if type(pe) == "table" and pe[name] then return pe[name] end
   local g = rawget(_G, "__TV_PACKAGES")
   if g and g[name] then return g[name] end
   local e = rawget(_G, "__TV_EMBED")
@@ -1340,6 +1347,13 @@ do
 -- ============================================================================
 
 local function _pkg(name)
+  -- NoKey-VoltCompat v1: executor sandboxes (Volt) hide chunk-written
+  -- globals from rawget(_G) — plain reads go through the chunk env, so
+  -- try them first and keep the original _G lookups as fallbacks.
+  local pg = __TV_PACKAGES
+  if type(pg) == "table" and pg[name] then return pg[name] end
+  local pe = __TV_EMBED
+  if type(pe) == "table" and pe[name] then return pe[name] end
   local g = rawget(_G, "__TV_PACKAGES")
   if g and g[name] then return g[name] end
   local e = rawget(_G, "__TV_EMBED")
@@ -2311,6 +2325,13 @@ do
 -- ============================================================================
 
 local function _pkg(name)
+  -- NoKey-VoltCompat v1: executor sandboxes (Volt) hide chunk-written
+  -- globals from rawget(_G) — plain reads go through the chunk env, so
+  -- try them first and keep the original _G lookups as fallbacks.
+  local pg = __TV_PACKAGES
+  if type(pg) == "table" and pg[name] then return pg[name] end
+  local pe = __TV_EMBED
+  if type(pe) == "table" and pe[name] then return pe[name] end
   local g = rawget(_G, "__TV_PACKAGES")
   if g and g[name] then return g[name] end
   local e = rawget(_G, "__TV_EMBED")
@@ -2332,13 +2353,13 @@ LoaderMain.MANIFEST_FILE = "manifest.json"
 
 -- เผยแพร่จริง: แก้ OWNER เป็น GitHub user/org ของโปรเจกต์ (บันทึกใน CHANGELOG)
 LoaderMain.OWNER = "auto578wqd"
-LoaderMain.REPO = "thevoider"
+LoaderMain.REPO = "loader"
 
 LoaderMain.BASES = {
-  "https://raw.githubusercontent.com/OWNER/thevoider/main",
-  "https://cdn.jsdelivr.net/gh/OWNER/thevoider@main",
-  "https://raw.githack.com/OWNER/thevoider/main",
-  "https://github.com/OWNER/thevoider/raw/main",
+  "https://raw.githubusercontent.com/OWNER/loader/main",
+  "https://cdn.jsdelivr.net/gh/OWNER/loader@main",
+  "https://raw.githack.com/OWNER/loader/main",
+  "https://github.com/OWNER/loader/raw/main",
 }
 
 --- รายการ URL เต็ม (แทน OWNER จริง) — ใช้ต่อ path ที่ต้องการ
@@ -2385,7 +2406,10 @@ end
 -- ---- default loadFn (Luau: loadstring / Lua 5.3: load) ----------------------
 
 local function defaultLoadFn(source, chunkName)
-  local ls = rawget(_G, "loadstring") or rawget(_G, "load")
+  -- NoKey-VoltCompat v1: plain env reads first (see _pkg note)
+  local ls = (type(loadstring) == "function" and loadstring)
+    or (type(load) == "function" and load)
+    or rawget(_G, "loadstring") or rawget(_G, "load")
   if type(ls) ~= "function" then
     return nil, "environment นี้ไม่มี loadstring/load — โหลด bundle ไม่ได้"
   end
@@ -2400,7 +2424,16 @@ end
 function LoaderMain.new(opts)
   opts = opts or {}
   local self = setmetatable({}, { __index = LoaderMain })
-  self.env = opts.env or _G
+  self.env = opts.env or (function()
+    -- NoKey-VoltCompat v1: prefer the chunk env (getfenv) over _G —
+    -- executor APIs (http_request) may be injected into the chunk env only
+    local ok, e = pcall(function()
+      if type(getfenv) == "function" then return getfenv() end
+      return nil
+    end)
+    if ok and type(e) == "table" then return e end
+    return _G
+  end)()
   self.logger = opts.logger or function(level, msg)
     local w = level == "error" and (type(warn) == "function" and warn or print)
       or print
