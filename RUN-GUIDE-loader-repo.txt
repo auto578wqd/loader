@@ -103,3 +103,43 @@ https://raw.githubusercontent.com/auto578wqd/loader/main/manifest.json
   loader.lua      114,328 bytes | sha256: 57ec9f700df4e5c4ebb9a635ca1b547964c6d9b52450833fcc9fe8b4c8bad872
   manifest.json       292 bytes | sha256: ab182c355da714ef2f684a29c16c76d31119707abb23b02f1d8e033ea8f994bd
   the-voider.lua  321,704 bytes | sha256: b9d91ae217035fb1f87845058319187675d437906e17c0b9ba16c4d6ca27ad69
+
+================================================================
+อัปเดตฉบับที่ 3 (2026-10-02): VoltCompat v1b — แก้ "ไม่มี task library"
+================================================================
+อาการเดิม (จากคอนโซล Volt ของคุณ):
+  [Loader][info] ตรวจสอบความถูกต้นฉบับ: เต็มรูปแบบ (โหมดซอฟต์แวร์, 401.7 ms)
+  [Loader][error] รัน bundle v0.7.0 ไม่สำเร็จ:
+  the-voider.lua:0.7.0:1293: Runtime.Spawn: ไม่มี task library (ctx.task)
+
+ความหมาย:
+  - VoltCompat v1 ได้ผลแล้ว: preflight ผ่าน, ดึงไฟล์ครบ, ตรวจ SHA-256 ผ่าน
+    (โหมดซอฟต์แวร์ = คำนวณ hash ด้วย Lua ล้วน เพราะ Volt ไม่เปิด bit32 - ปกติ)
+  - ตอนนี้พังขั้นถัดไป: ตัว bundle หา library "task" ของ Roblox ไม่เจอ
+    เพราะค้นด้วย rawget(_G) ช่องเดียว ซึ่ง Volt มองไม่เห็น (เหตุผลเดียวกับ v1)
+
+สิ่งที่แก้ (v1b — แก้ใน loader.lua เท่านั้น the-voider.lua/manifest ไม่แตะ):
+  1) ก่อนรัน bundle จะสำรวจหาสิ่งที่ Volt ซ่อนไว้จากทุกช่องทาง
+     (chunk env ผ่าน getfenv / _G / getgenv) แล้วส่งต่อเข้า _G + getgenv
+     ให้ bundle มองเห็น: task, Instance, game, workspace, Drawing, warn,
+     readfile, writefile, isfile, setclipboard, gethui, getgenv
+  2) ถ้าไม่พบ task จริงเลย จะสร้าง "task shim" ฉุกเฉินจาก
+     coroutine + RunService.Heartbeat ให้ระบบเดินต่อได้ทันที
+  * ทดสอบ syntax ด้วย AST parser แล้ว: ผ่าน
+
+สิ่งที่ต้องทำ: แทนที่ loader.lua อีกครั้ง (วิธีเดิมเป๊ะ - 1 นาที)
+  แตก zip -> Add file -> Upload files -> ลาก loader.lua ตัวใหม่ -> Commit
+  (manifest.json / the-voider.lua ไม่ต้องแตะ)
+  แล้วรัน loadstring เดิม
+
+สัญญาณที่ควรเห็นใน F9 หลังแก้:
+  - ไม่มี "ไม่มี task library" อีก
+  - "โหลดสำเร็จ v0.7.0 (releaseId r2026-10-01-16, channel stable)"
+  - "ระบบ v0.7.0 พร้อมใช้งาน" = เมนูโผล่ในเกม
+
+ถ้ามี error ใหม่: ถ่ายภาพ F9 ทั้งหน้ามาได้เลย — แก้ต่อทันที (ทีละชั้นใกล้เสร็จแล้ว)
+
+ลายนิ้วมือไฟล์ฉบับ VoltCompat v1b:
+  loader.lua      117,155 bytes | sha256: 20d68d04d2c175ae4586f1ac3fe5c01609688a4eccde005525b54e42ea65b426
+  manifest.json       292 bytes | sha256: ab182c355da714ef2f684a29c16c76d31119707abb23b02f1d8e033ea8f994bd
+  the-voider.lua  321,704 bytes | sha256: b9d91ae217035fb1f87845058319187675d437906e17c0b9ba16c4d6ca27ad69

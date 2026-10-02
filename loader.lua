@@ -2615,6 +2615,74 @@ function LoaderMain:boot()
 
   -- 4) execute bundle (ตั้ง host + BUNDLE_RUN ก่อนเสมอ)
   self:_ensureHost()
+  -- NoKey-VoltCompat v1b: executor sandboxes (Volt) hide Roblox builtins from
+  -- rawget(_G) inside loadstring'd chunks (proven: :2434 crash + missing
+  -- ctx.task). Probe every channel and mirror what we find into _G + getgenv
+  -- so the bundle's rawget(_G, ...) lookups resolve. task is a hard
+  -- requirement (Registry:Spawn throws without it).
+  do
+    local okE, E = pcall(getfenv)
+    local okG, GG = pcall(getgenv)
+    local lookup = {}
+    if okE and type(E) == "table" then lookup[#lookup + 1] = E end
+    if type(_G) == "table" then lookup[#lookup + 1] = _G end
+    if okG and type(GG) == "table" and GG ~= _G then lookup[#lookup + 1] = GG end
+    local names = {
+      "task", "Instance", "game", "workspace", "Drawing", "warn",
+      "readfile", "writefile", "isfile", "setclipboard", "gethui", "getgenv",
+    }
+    for _, name in ipairs(names) do
+      if type(_G) ~= "table" or rawget(_G, name) == nil then
+        for _, t in ipairs(lookup) do
+          local v = t[name]
+          if v ~= nil then
+            if type(_G) == "table" then pcall(function() rawset(_G, name, v) end) end
+            if okG and type(GG) == "table" then pcall(function() GG[name] = v end) end
+            break
+          end
+        end
+      end
+    end
+    -- last resort: no real task library anywhere -> minimal shim built on
+    -- RunService.Heartbeat so Registry:Spawn / Watchdog can run
+    if type(_G) == "table" and rawget(_G, "task") == nil then
+      local gameRef
+      for _, t in ipairs(lookup) do
+        local g = t.game
+        if g ~= nil and type(g) ~= "function" then gameRef = g break end
+      end
+      local okRS, hb = pcall(function()
+        return gameRef:GetService("RunService").Heartbeat
+      end)
+      if gameRef and okRS and type(hb) == "userdata" then
+        local shim = {}
+        function shim.spawn(f, ...)
+          if type(f) ~= "function" then return nil end
+          local co = coroutine.create(f)
+          local n = select("#", ...)
+          local args = { ... }
+          local okRes, err = coroutine.resume(co, unpack(args, 1, n))
+          if not okRes and co then
+            pcall(function()
+              warn("[The Voider][VoltCompat] task shim error: " .. tostring(err))
+            end)
+          end
+          return co
+        end
+        function shim.wait(t)
+          local sec = tonumber(t) or 0
+          local start = os.clock()
+          while os.clock() - start < sec do
+            hb:Wait()
+          end
+          return os.clock() - start
+        end
+        pcall(function() rawset(_G, "task", shim) end)
+        if okG and type(GG) == "table" then pcall(function() GG.task = shim end) end
+        self.logger("warn", "VoltCompat: ไม่พบ task library จริง - เปิดใช้ task shim (Heartbeat) แทน")
+      end
+    end
+  end
   local run = rawget(_G, "__TV_BUNDLE_RUN")
   rawset(_G, "__TV_BUNDLE_RUN", { source = source, manifest = m })
   local prevHost = rawget(_G, "__TV_HOST")
