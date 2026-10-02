@@ -4,8 +4,8 @@
   "releaseId": "r2026-10-01-16",
   "files": {
     "the-voider.lua": {
-      "sha256": "b9d91ae217035fb1f87845058319187675d437906e17c0b9ba16c4d6ca27ad69",
-      "size": 321704
+      "sha256": "05aceca9543a9749128361a1f919a6568fd49630adc9e155b89a69c357f23f08",
+      "size": 322728
     }
   },
   "minLoaderVersion": "0.3.0",

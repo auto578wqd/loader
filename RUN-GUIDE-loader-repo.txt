@@ -143,3 +143,36 @@ https://raw.githubusercontent.com/auto578wqd/loader/main/manifest.json
   loader.lua      117,155 bytes | sha256: 20d68d04d2c175ae4586f1ac3fe5c01609688a4eccde005525b54e42ea65b426
   manifest.json       292 bytes | sha256: ab182c355da714ef2f684a29c16c76d31119707abb23b02f1d8e033ea8f994bd
   the-voider.lua  321,704 bytes | sha256: b9d91ae217035fb1f87845058319187675d437906e17c0b9ba16c4d6ca27ad69
+
+================================================================
+อัปเดตฉบับที่ 4 (2026-10-02): VoltCompat v1c — แก้ UI crash บรรทัด 7377
+================================================================
+อาการเดิม:
+  รัน bundle v0.7.0 ไม่สำเร็จ: the-voider.lua:0.7.0:7377: attempt to index nil with 'obj'
+
+ความหมาย + สิ่งที่แก้:
+  - v1b ได้ผล: task library ใช้ได้แล้ว (ไม่มี warn ของ shim = เจอ task จริง)
+  - คราวนี้พังที่ชั้น UI: ตัว backend สร้าง handle ไม่สำเร็จแล้วส่ง nil ต่อ
+    แต่โค้ด UI กว่า 40 จุดชี้ .obj ทันทีโดยไม่ตรวจ nil -> boot ตายทั้งระบบ
+  - แก้ 2 จุดใน the-voider.lua (แล้ว regenerate manifest.json ใหม่):
+    P1 Registry: หา task/Drawing/Instance จากทุกช่องทาง (plain read + getgenv)
+    P2 Backend:Create: ห้ามคืน nil อีกต่อไป - คืน "null handle" (เขียน property
+       = no-op อ่าน = nil) + log เหตุผลจริงเป็นภาษาไทย -> ครอบคลุม caller
+       ทั้ง 40+ จุดในครั้งเดียว boot ไม่มีทางตายจาก UI อีก
+  * ทดสอบ syntax ด้วย AST parser แล้ว: ผ่านทั้ง loader และ bundle
+
+สิ่งที่ต้องอัปโหลดรอบนี้: 2 ไฟล์ (the-voider.lua + manifest.json)
+  - loader.lua ใน repo เป็นตัวล่าสุดอยู่แล้ว ไม่ต้องแตะ
+  - Add file -> Upload files -> ลาก 2 ไฟล์ -> Commit changes
+  - รัน loadstring เดิม
+
+สัญญาณที่ควรเห็น (F9):
+  - "โหลดสำเร็จ v0.7.0 (releaseId r2026-10-01-16, channel stable)"
+  - "ระบบ v0.7.0 พร้อมใช้งาน" = เมนูโผล่ในเกม
+  - ถ้า UI มีปัญหา ระบบจะไม่ตายแล้ว - จะขึ้น warn "VoltCompat: ..." และ
+    notification เปลี่ยนเป็น plain text ในคอนโซลแทน (ใช้งานส่วนอื่นต่อได้)
+
+ลายนิ้วมือไฟล์ฉบับ VoltCompat v1c:
+  loader.lua      117,155 bytes | sha256: 20d68d04d2c175ae4586f1ac3fe5c01609688a4eccde005525b54e42ea65b426
+  manifest.json       292 bytes | sha256: 3992e75e8bb2f61e98c7dc315aaa95189fd8cf688ef17c83406e9279d266623c
+  the-voider.lua  322,728 bytes | sha256: 05aceca9543a9749128361a1f919a6568fd49630adc9e155b89a69c357f23f08

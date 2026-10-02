@@ -628,11 +628,18 @@ Registry.KIND_KEYS = { "tasks", "connections", "renders", "temps" }
 
 function Registry.new(ctx)
   ctx = ctx or {}
+  -- NoKey-VoltCompat v1c: executor sandboxes (Volt) hide chunk-written /
+  -- injected globals from rawget(_G) - add plain env reads + getgenv
+  local function __tv_gv(name)
+    local ok, g = pcall(getgenv)
+    if ok and type(g) == "table" then return g[name] end
+    return nil
+  end
   local self = setmetatable({
     clock = ctx.clock or os.clock,
-    task = ctx.task or rawget(_G, "task"),
-    drawing = ctx.drawing or rawget(_G, "Drawing"),
-    instance = ctx.instance or rawget(_G, "Instance"),
+    task = ctx.task or rawget(_G, "task") or task or __tv_gv("task"),
+    drawing = ctx.drawing or rawget(_G, "Drawing") or drawing or __tv_gv("Drawing"),
+    instance = ctx.instance or rawget(_G, "Instance") or instance or __tv_gv("Instance"),
     debug = ctx.debug or false,
     boundary = nil,   -- ติดตั้งภายหลังโดย init.lua
     watchdog = nil,   -- ติดตั้งภายหลังโดย init.lua
@@ -5473,19 +5480,37 @@ end
 --- สร้าง instance ใต้ parent (default = root) — ต้องเรียกภายใน
 --- Registry:Scope("<NodeName>", ...) ของโหนดผู้เป็นเจ้าเสมอ
 --- คืน handle ของ registry (มี .obj / .Release) หรือ nil + reason (degraded)
+-- NoKey-VoltCompat v1c: black-hole object (writes no-op, reads nil) so the
+-- 40+ `.obj` call sites across Notification/Hub/HUD can never crash boot
+local __TV_NULL_OBJ = setmetatable({}, {
+  __newindex = function() end,
+})
+function Backend:_nullHandle(reason)
+  if self.logger then
+    self.logger("warn", ("VoltCompat: UI handle ใช้ไม่ได้ (%s) - ใช้ null handle แทน (UI อาจไม่แสดงผล)")
+      :format(tostring(reason)))
+  end
+  return {
+    obj = __TV_NULL_OBJ,
+    Release = function() end,
+    Remove = function() end,
+    Destroy = function() end,
+    __tv_null = true,
+  }
+end
 function Backend:Create(class, props, parent)
   if not self.available then
-    return nil, self.reason or "UI unavailable"
+    return self:_nullHandle(self.reason or "UI unavailable")
   end
   props = props or {}
   parent = parent or self.root
-  local handle = self.runtime.NewRender("Instance", {
+  local handle, why2 = self.runtime.NewRender("Instance", {
     Class = class,
     Props = props,
     Parent = parent,
   })
   if not handle then
-    return nil, "NewRender ล้มเหลว (Instance/props ผิดรูปแบบ?)"
+    return self:_nullHandle("NewRender ล้มเหลว: " .. tostring(why2))
   end
   return handle
 end
